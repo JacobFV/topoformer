@@ -220,3 +220,43 @@ Parallel subagents work in isolated worktrees; root is the only launcher of main
 - Any claim that machine variables are feelings or consciousness.
 - Intrinsic distress, self-preservation or positive self-report objectives.
 - A large new architecture before simple controls are established.
+
+---
+
+## v2 revisions (2026-09-26, after internal review [review/design-review.md](review/design-review.md); these supersede v1 where they differ)
+
+1. **Promotion baseline (F1).** Each A2 arm's deployment mode is fixed before training. Promotion compares the arm with the **bootstrap under the same mode** and with the **bootstrap under its best fixed mode**. Both must pass for promotion, and the full arm × mode table is always reported. The arms are evaluated under greedy, sampled and R-mask.
+2. **A2-reh control (F2).** A matched **imitation-only** arm is added: the same rehearsal loss on the same visited states with the RL loss off. A gain attributed to RL must beat it. dep_reuse (public-only) supervision is disclosed as supplied supervision.
+3. **A2 base (F3).** A2-reh, A2-crit and A2-dep use the **C1 recipe (anchor on) plus one change**, and are compared with C1 (existing P2a run). A2-ent uses **C0 plus the entropy Lagrangian, without the anchor**; it tests "anchor effect = entropy control?".
+4. **A2-dep (F4).** Training rollouts **sample from the masked policy** π_mask(a) ∝ π(a)·[a not masked by the progress diagnostic], and use its log-probability. This is exactly on-policy and needs no off-policy correction. The trained model is also evaluated under plain greedy and sampled, which separates the training effect from the deployment effect.
+5. **Environment clone (F7).**
+   - `DepWorkshop.clone()` shares the solver worker, never copying process handles.
+   - An **exact solver-result cache** keyed by (primitive, canonical problem, budget) removes wall-clock deadline nondeterminism from branches. It is also used in main runs only if proven result-identical.
+   - Branching copies the actor's recurrent state, the diagnostic state and the appraisal state.
+6. **Track C default = continuation (F9).** The default deployment is **greedy + R-mask**, and every Q̂ label uses that same continuation. The learned controller is a **one-step rollout improvement over greedy + R-mask**; interventions are deviations from it.
+7. **Label use (F8).**
+   - Branch returns are single-world outcomes. They are used **only as regression targets** for E[U | visible history, u, continuation], with K draws for stochastic interventions.
+   - They are never used as argmax class labels.
+   - The appraisal heads are trained with the policy trunk detached (stop-gradient). No loss rewards higher predicted values.
+8. **Track C headroom and controls (F10).**
+   - The criterion is split by base type:
+     - **loop-prone bases** (P1 RL finals): must beat the best fixed rule by ≥ .02 utility;
+     - **competent bases** (bootstraps): must not lose more than .01 and must reduce cost or no-progress.
+   - Sample sizes come from A1 variances before registration.
+   - Added controls: **random interventions at the matched rate**, and an **automatic threshold rule** (intervene when predicted success < τ; τ registered on development data).
+9. **Progress diagnostic (F15).**
+   - Records are keyed by **content** (primitive, canonical problem, budget, status), not by handle, so repeated identical calls match.
+   - `think` is counted as no-progress when it leaves the signature unchanged (consistent with P2a). Its work is still charged separately.
+   - Classes have an explicit precedence: rejected > useful-inspection > solver-work > triggered-revision > short-cycle > idempotent > other-progress.
+   - "Justified revision" is renamed **triggered revision**, since it records a trigger, not a rationality judgement.
+10. **Probeworld (F13).**
+    - Minimal family: 4 instance types, ≤ 5 decisions per query, k ∈ {1, 2, 4, 8}, finite beliefs.
+    - Case types (a)–(d) are defined from belief-conditioned values before and after each step, with a registered ε.
+    - Splits are defined **by generator parameters** (price regions, k, condition flags), never by case type, since case types depend on the policy.
+11. **Budget and schedule (F17, F18).**
+    - The binding constraint is 172.8k core-s, not core count.
+    - The dev/test line is raised to ~12k.
+    - Tracks B and C run **CPU-only**, so GPU occupancy counts only depworld actor jobs.
+    - A2 is not held for the throughput work.
+    - **Phase F must launch by ~T+15 h (2026-09-27T09:45Z).**
+12. **Fallback deliverable (F19).** If nothing is promoted, the campaign's Track A deliverable is a **localized reason**, built from the arm × mode table and Part D-style readings on the new arms. A supplied/learned/generalized ledger ([ledger-supplied-learned.md](ledger-supplied-learned.md)) is started now and maintained per experiment. Depworld price/reuse response (Phase E) stays optional; probeworld carries the ρ_k deliverable.

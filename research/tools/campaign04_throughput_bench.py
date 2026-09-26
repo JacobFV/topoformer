@@ -76,7 +76,40 @@ def run_tranche(args):
                                       Path(args.scratch) / "dev.jsonl.gz")
         out["dev_cpu"] = time.process_time() - cpu
     out["data_hash_scope"] = "includes wall timings; not comparable across runs"
+    out["parameter_sha256"] = state_hash(learner.model.state_dict())
+    out["optimizer_sha256"] = state_hash(learner.optimizer.state_dict()["state"])
     return out
+
+
+TIMING = {"episode_process_cpu_seconds", "episode_wall_seconds", "neural_forward_wall_seconds_allocated", "timing",
+          "solver_cpu_seconds", "cpu_seconds", "child_cpu_seconds"}
+
+
+def strip_timing(value):
+    if isinstance(value, dict):
+        return {k: strip_timing(v) for k, v in value.items() if k not in TIMING}
+    if isinstance(value, list):
+        return [strip_timing(v) for v in value]
+    return value
+
+
+def state_hash(tree):
+    """sha256 over the exact bytes of every tensor (and repr of other leaves), in key order."""
+    import hashlib
+    import torch
+    h = hashlib.sha256()
+
+    def walk(x):
+        if torch.is_tensor(x):
+            h.update(x.detach().cpu().contiguous().numpy().tobytes())
+        elif isinstance(x, dict):
+            for k in sorted(x, key=str):
+                h.update(str(k).encode())
+                walk(x[k])
+        else:
+            h.update(repr(x).encode())
+    walk(tree)
+    return h.hexdigest()
 
 
 def run_evaluate(args):
@@ -107,8 +140,11 @@ def run_evaluate(args):
         rollout = time.process_time() - cpu
         summary = summarize(rows)
         write_rows(Path(args.scratch) / f"eval-{mode}.jsonl.gz", rows)
+        import hashlib
         out[mode] = {"rollout_cpu": rollout, "total_cpu": time.process_time() - cpu, "success": summary["success"],
-                     "utility": summary["means"]["utility"]}
+                     "utility": summary["means"]["utility"],
+                     "rows_sha256_minus_timing": hashlib.sha256("\n".join(
+                         json.dumps(strip_timing(r), sort_keys=True) for r in rows).encode()).hexdigest()}
     return out
 
 

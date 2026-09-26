@@ -192,10 +192,14 @@ def test_patched_reference_helpers_route_the_encoder_to_the_reference_body(monke
 
 
 def test_reference_path_is_selectable_and_default_is_fast():
-    assert fast.enabled()
+    import os
+    default = os.environ.get("TENSEGRA_REFERENCE_PATH", "") not in ("1", "true", "yes")
+    assert fast.enabled() == default
     with fast.path(False):
         assert not fast.enabled() and fast.describe() == "reference"
-    assert fast.enabled() and fast.describe() == "fast"
+    with fast.path(True):
+        assert fast.enabled() and fast.describe() == "fast"
+    assert fast.enabled() == default
 
 
 # ---------------------------------------------------------------------------

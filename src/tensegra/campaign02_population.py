@@ -322,6 +322,8 @@ class PopulationRun:
             "campaign02_memory.py", "campaign02_memory_policy.py", "campaign02_modular.py")}
         if config.world_family == "depworld":  # only then, so historical resume hashes are unchanged
             self.sources["campaign03_depworld.py"] = sha256(Path(__file__).with_name("campaign03_depworld.py"))
+            # extended-04 fast path (result-identical; its code is part of the run's provenance).
+            self.sources["campaign04_fast.py"] = sha256(Path(__file__).with_name("campaign04_fast.py"))
         if self.state_path.exists():
             self.state = json.loads(self.state_path.read_text())
             if self.state["source_hashes"] != self.sources:

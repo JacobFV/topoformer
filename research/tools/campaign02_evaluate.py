@@ -242,6 +242,8 @@ def main():
         sources["depworld"] = file_hash(Path(training.__file__).with_name("campaign03_depworld.py"))
         # Evaluator-only P1 step audit (logging only; dynamics unchanged).
         sources["p1_audit"] = file_hash(Path(training.__file__).with_name("campaign03_p1_audit.py"))
+        # extended-04 result-identical fast path (TENSEGRA_REFERENCE_PATH=1 forces the reference path).
+        sources["fast"] = file_hash(Path(training.__file__).with_name("campaign04_fast.py"))
     bindings = []
     for binding in cfg["checkpoints"]:
         actual = file_hash(binding["path"])
@@ -254,7 +256,8 @@ def main():
                "policy_input_scope": "public observation/candidate encodings only; no teacher at evaluation",
                "address_metric_scope": "claimed role/status/retrieval/provenance validity, not independent validity of faulted payloads or task relevance",
                "intervention_scope": "explicit public-ordinal post-validation return faults; canonical records and actual-world validators unchanged",
-               "selection_rule": "frozen supplied checkpoint, no selection", "no_training": True}
+               "selection_rule": "frozen supplied checkpoint, no selection", "no_training": True,
+               "throughput_path": training._fast.describe()}
     if torch.device(args.device).type == "cuda":
         torch.cuda.reset_peak_memory_stats(torch.device(args.device))
     with BoundedSolver() as solver:

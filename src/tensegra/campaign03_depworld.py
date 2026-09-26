@@ -24,6 +24,7 @@ logging-only; they never feed an actor, encoder, catalogue or reference.
 from __future__ import annotations
 
 from copy import deepcopy
+from copy import deepcopy as _deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import heapq
@@ -33,6 +34,7 @@ import random
 import time
 from typing import Any, Callable
 
+from . import campaign04_fast as _fast
 from .campaign02_world import Action
 
 VERSION = "depworld-v1"
@@ -552,6 +554,8 @@ class DepObservation:
     attempts: tuple[dict[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
+        if _fast.enabled():  # identical dict, one conversion pass (extended-04 Phase A)
+            return _fast.observation_dict(self)
         return json.loads(json.dumps(asdict(self)))
 
 
@@ -612,6 +616,8 @@ class DepWorkshop:
     # --- public view ------------------------------------------------------
     def observe(self) -> DepObservation:
         s = self._spec
+        # Value-identical copies either way; the fast copier skips deepcopy's memo machinery.
+        deepcopy = _fast.plain_copy if _fast.enabled() else _deepcopy
         req = None
         if self._req_known:
             req = {k: deepcopy(v) for k, v in self._req.items()}
@@ -993,10 +999,18 @@ class DepWorkshop:
         return True, "valid"
 
     # --- evaluator ----------------------------------------------------------
+    def _cost(self) -> float:
+        s = self._spec
+        return (self._steps * s.action_price + self._travel * s.travel_price + self._observations * s.observation_price
+                + self._work * s.work_price + self._compute_units * s.compute_price)
+
+    def current_utility(self) -> float:
+        """Exactly evaluate()["utility"] (same expression), without copying the history."""
+        return float(self._verified) - self._cost()
+
     def evaluate(self) -> dict[str, Any]:
         s = self._spec
-        cost = (self._steps * s.action_price + self._travel * s.travel_price + self._observations * s.observation_price
-                + self._work * s.work_price + self._compute_units * s.compute_price)
+        cost = self._cost()
         uses = self._uses
         return {"verified_success": self._verified, "utility": float(self._verified) - cost, "cost": cost,
                 "steps": self._steps, "observations": self._observations, "work_units": self._work,
@@ -1603,13 +1617,36 @@ def _masked(vector: list[float], indices) -> list[float]:
     return vector
 
 
-def encode_public(o: DepObservation, actions: list[Action], version: str = "d1"):
+# The fast encoder re-implements (or memoizes) these reference helpers. If any is replaced at run
+# time (e.g. the Stage B preflight's perturbation audits), encode_public uses the reference body.
+_FAST_HELPERS = ("relations", "_draft_match", "current_request", "current_dependencies", "record_usable",
+                 "snapshot_options", "_payload_facts", "relevant_dependencies", "action_key", "_Context",
+                 "encode_observation_d1", "encode_action_d1", "_action_primitive", "_log", "overlaps")
+
+
+def _unpatched() -> bool:
+    g = globals()
+    return all(g[name] is original for name, original in _FAST_ORIGINALS.items())
+
+
+def encode_public(o: DepObservation, actions: list[Action], version: str = "d1", fast: bool | None = None):
+    """(observation vector, candidate matrix). fast=None follows campaign04_fast.enabled(); the fast
+    encoder is bit-identical (tests/test_campaign04_fast.py) and falls back to this reference body on
+    any exception, so errors are the reference's."""
+    if (_fast.enabled() if fast is None else fast) and version in FEATURE_MASKS and _unpatched():
+        try:
+            return _fast.encode_public_d1(o, actions, version)
+        except Exception:
+            _fast.FALLBACKS["encode_public"] += 1
     if version not in FEATURE_MASKS:
         raise ValueError(f"unknown depworld feature version {version}")
     ctx = _Context(o, applicability=version != "d1-noapp")
     obs_mask, cand_mask = FEATURE_MASKS[version]
     return (_masked(encode_observation_d1(o, ctx), obs_mask),
             [_masked(encode_action_d1(o, x, ctx), cand_mask) for x in actions])
+
+
+_FAST_ORIGINALS = {name: globals()[name] for name in _FAST_HELPERS}
 
 
 # ---------------------------------------------------------------------------

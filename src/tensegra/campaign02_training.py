@@ -24,6 +24,8 @@ from typing import Callable
 import torch
 from torch import nn
 
+from . import campaign04_fast as _fast
+
 
 def digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -122,7 +124,10 @@ def normalized_policy_config(raw: dict) -> dict:
     return {"feature_version": "v1", **raw}
 
 
-def collate(frames: list[Frame], device="cpu"):
+def collate(frames: list[Frame], device="cpu", fast: bool | None = None):
+    """fast=None follows campaign04_fast.enabled(); the fast collation builds identical tensors."""
+    if _fast.enabled() if fast is None else fast:
+        return _fast.collate(frames, device)
     if not frames or any(not f.candidates or not 0 <= f.target < len(f.candidates) for f in frames):
         raise ValueError("Every frame needs a valid candidate target")
     count, dim = max(len(f.candidates) for f in frames), len(frames[0].candidates[0])
@@ -454,7 +459,10 @@ def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
                 environments[index].charge_compute(neural_work_per_forward)
                 after = environments[index].step(action)
                 observations[index] = after
-                utility = float(environments[index].evaluate()["utility"])
+                if _fast.enabled() and hasattr(environments[index], "current_utility"):
+                    utility = float(environments[index].current_utility())  # == evaluate()["utility"]
+                else:
+                    utility = float(environments[index].evaluate()["utility"])
             terms[index].append((logp[row], values[row], entropy[row], utility-previous_utilities[index]))
             if reference is not None:
                 kls[index].append(kl[row])
@@ -696,6 +704,7 @@ class Learner:
             result["phase_timing"] = clock.as_dict()
         if anchor is not None:
             result["anchor"] = {**self.anchor_provenance, "anchor_kl_weight": cfg.anchor_kl_weight}
+        result["throughput_path"] = _fast.describe()  # observational; both paths give identical results
         return result
 
     def evaluate(self, seeds, world_factory, output: Path | None = None):

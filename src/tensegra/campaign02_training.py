@@ -59,8 +59,40 @@ class TrainConfig:
     # never replaced). Independent of the tranche-start KL above, which is kept.
     anchor_kl_weight: float = 0.0
     anchor_checkpoint: dict | None = None
+    # extended-04 Track A2 improvement-screen options. Every default is OFF and leaves
+    # the historical code path (parameters, optimizer state, curves) bit-identical.
+    # All four need batched actor-critic rollouts. Semantics: see A2_OPTION_NOTES.
+    rehearsal_weight: float = 0.0          # A2-reh: + w * mean CE(public teacher action | visited state)
+    rl_loss_weight: float = 1.0            # A2-imit: 0 turns the RL policy-gradient + critic loss off
+    entropy_target: float | None = None    # A2-ent: per-decision entropy target (nats), Lagrangian dual
+    entropy_dual_lr: float = 0.0
+    entropy_dual_init: float = 0.0
+    entropy_dual_max: float = 1.0          # the dual is clipped to [-max, +max]
+    critic_warmup_updates: int = 0         # A2-crit: first W actor-critic updates of the lineage fit the critic only
+    critic_warmup_shared: bool = False     # False: value head only; True: value head + shared trunk
+    rollout_mask: str | None = None        # A2-dep: registered masked-sampling rule, e.g. "progress_v1"
 
     def __post_init__(self):
+        if not math.isfinite(self.rehearsal_weight) or self.rehearsal_weight < 0:
+            raise ValueError("Invalid rehearsal weight")
+        if not math.isfinite(self.rl_loss_weight) or self.rl_loss_weight < 0:
+            raise ValueError("Invalid RL loss weight")
+        if self.entropy_target is not None and (not math.isfinite(self.entropy_target) or self.entropy_target < 0):
+            raise ValueError("Invalid entropy target")
+        if min(self.entropy_dual_lr, self.entropy_dual_max) < 0 or not all(map(math.isfinite, (
+                self.entropy_dual_lr, self.entropy_dual_init, self.entropy_dual_max))) \
+                or abs(self.entropy_dual_init) > self.entropy_dual_max:
+            raise ValueError("Invalid entropy dual settings")
+        if self.entropy_target is None and (self.entropy_dual_lr or self.entropy_dual_init):
+            raise ValueError("Entropy dual settings need an entropy_target")
+        if not isinstance(self.critic_warmup_updates, int) or self.critic_warmup_updates < 0:
+            raise ValueError("Invalid critic warm-up length")
+        if self.rollout_mask is not None and not isinstance(self.rollout_mask, str):
+            raise ValueError("rollout_mask names a registered mask rule")
+        if a2_options_active(self) and self.rollout_mode != "batched":
+            # (The method may be set per round by a population, so it is checked at training time.)
+            raise ValueError("A2 options (rehearsal/rl_loss_weight/entropy target/critic warm-up/rollout mask) "
+                             "need batched actor-critic rollouts")
         if not math.isfinite(self.kl_weight) or self.kl_weight < 0:
             raise ValueError("Invalid KL anchor weight")
         if not math.isfinite(self.anchor_kl_weight) or self.anchor_kl_weight < 0:
@@ -83,6 +115,61 @@ class TrainConfig:
 
 
 ANCHOR_FIELD_DEFAULTS = {"anchor_kl_weight": 0.0, "anchor_checkpoint": None}
+# extended-04 A2 fields: absent from older checkpoints = their (off) defaults, so the
+# historical import/resume record is unchanged when every option is off.
+A2_FIELD_DEFAULTS = {"rehearsal_weight": 0.0, "rl_loss_weight": 1.0, "entropy_target": None,
+                     "entropy_dual_lr": 0.0, "entropy_dual_init": 0.0, "entropy_dual_max": 1.0,
+                     "critic_warmup_updates": 0, "critic_warmup_shared": False, "rollout_mask": None}
+
+A2_OPTION_NOTES = """extended-04 Track A2 training options (batched actor-critic only; all default off).
+
+rehearsal_weight w (A2-reh): loss += w * mean over this update's visited decisions of
+  CE(teacher action | public state) on the CURRENT policy's unmasked logits. Visited
+  decisions = every state of the batch's sampled on-policy rollout (the RL training
+  states; no extra greedy rollouts). The teacher is the run's configured public
+  reference (population `teacher`, e.g. dep_reuse = DepReference("reuse")); it is
+  called as teacher.choose(observation, catalog) with the actor's own DepObservation
+  (a deep-copied, frozen public observation) and the actor's exact candidate catalog,
+  i.e. the same public information the actor sees; DepReference holds no episode
+  state and never touches the environment. It is supplied supervision (disclosed as
+  such). Teacher queries charge nothing to the environment/utility. A teacher action
+  outside the catalog is never repaired: that decision is dropped from the CE and
+  counted (rehearsal_out_of_catalog). The teacher never chooses the executed action.
+rl_loss_weight r (A2-imit control, r = 0): the policy-gradient term and the critic
+  regression are scaled by r: loss = r*(policy + value_weight*critic) - entropy terms
+  + tranche KL + anchor KL + rehearsal. With r = 0 what remains ON is: sampled
+  on-policy rollouts from the current policy (same visited-state source), the fixed
+  entropy bonus (entropy_weight), the tranche-start KL (kl_weight), the bootstrap
+  anchor KL (anchor_kl_weight) and the rehearsal CE. The value head then receives
+  no gradient.
+entropy_target H*, entropy_dual_lr eta (A2-ent): the entropy coefficient becomes
+  entropy_weight + lambda, lambda a Lagrange multiplier for the two-sided constraint
+  H = H*. H = per-decision entropy of the sampled (training) distribution over valid
+  candidates, decision mean over the update's rollout states (the same states and
+  distribution the entropy bonus uses). After each optimizer step,
+  lambda <- clip(lambda + eta*(H* - H_measured), -max, +max), H_measured from the
+  rollout before the step. lambda persists in the checkpoint (entropy_dual) and is
+  logged per update with H_measured.
+critic_warmup_updates W (A2-crit): the lineage's first W actor-critic updates (counted
+  from recorded actor-critic curve rows, so the supervised bootstrap's rows are
+  excluded and tranches/slots continue the count) use the same sampled rollouts but
+  optimize only value_weight * critic MSE. Only parameters of the value head
+  (module `value.*`) receive gradients/optimizer steps; with critic_warmup_shared the
+  shared trunk (everything except `value.*` and the actor head `scorer.*`) is also
+  trained, which changes the policy. Default False keeps the policy logits
+  bit-identical through warm-up. Frozen parameters get grad=None, so AdamW neither
+  steps nor decays them and their optimizer state is not created.
+rollout_mask (A2-dep): per decision, a registered mask function gives, for each
+  candidate, True = masked. Masked logits are set to -inf before sampling; if every
+  valid candidate would be masked, no mask is applied at that decision. The sampled
+  action, its log-probability (policy gradient) and the entropy term are all under the
+  masked distribution pi_M(a) ∝ pi(a)[a not masked], i.e. exactly on-policy for pi_M.
+  KL terms and rehearsal CE use the unmasked policy logits.
+"""
+
+
+def a2_options_active(config) -> bool:
+    return any(getattr(config, k, v) != v for k, v in A2_FIELD_DEFAULTS.items())
 
 
 @dataclass
@@ -388,10 +475,75 @@ def _frozen_kl(frozen, batch, frozen_hidden, indices, rows, logits):
     return (p_ref.exp()*(p_ref-p_cur)).sum(-1), frozen_hidden
 
 
+def _masked_logits(logits, valid, action_mask_fn, active, observations, public, histories, aux):
+    """A2-dep: -inf on masked candidates, per row; a row whose every valid candidate would
+    be masked keeps its unmasked logits (counted). Returns (logits', masked count per row)."""
+    mask = torch.zeros_like(valid)
+    counts = [0] * len(active)
+    for row, index in enumerate(active):
+        actions = public[row][0]
+        flags = action_mask_fn(index, observations[index], actions, histories[index])
+        if flags is None:
+            continue
+        flags = [bool(x) for x in flags]
+        if len(flags) != len(actions):
+            raise ValueError("action_mask_fn must return one flag per candidate")
+        if not any(flags):
+            continue
+        if all(flags):
+            aux["all_masked_fallbacks"] += 1
+            continue
+        mask[row, :len(flags)] = torch.tensor(flags, dtype=torch.bool, device=mask.device)
+        counts[row] = sum(flags)
+    mask &= valid
+    if not any(counts):
+        return logits, counts
+    aux["masked_decisions"] += sum(c > 0 for c in counts)
+    aux["masked_actions"] += sum(counts)
+    return logits.masked_fill(mask, -torch.inf), counts
+
+
+def _rehearsal_ce(logits, teachers, active, observations, public, aux):
+    """A2-reh: per-row CE(teacher action | public state) on the current (unmasked) logits.
+
+    The teacher gets exactly the actor's public observation and candidate catalog.
+    Returns ({row: position}, per-position CE tensor with gradient)."""
+    rows, targets = {}, []
+    for row, index in enumerate(active):
+        actions = public[row][0]
+        proposal = teachers[index].choose(observations[index], actions)
+        try:
+            target = actions.index(proposal)
+        except ValueError:  # never repaired; excluded and counted
+            aux["rehearsal_out_of_catalog"] += 1
+            continue
+        rows[row] = len(targets)
+        targets.append(target)
+    if not targets:
+        return rows, None
+    selected = torch.tensor(list(rows), device=logits.device)
+    target_tensor = torch.tensor(targets, device=logits.device)
+    chosen_logits = logits.index_select(0, selected)
+    aux["rehearsal_decisions"] += len(targets)
+    aux["rehearsal_agreement"] += int((chosen_logits.detach().argmax(-1) == target_tensor).sum())
+    return rows, nn.functional.cross_entropy(chosen_logits, target_tensor, reduction="none")
+
+
 def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
                       neural_work_per_forward=1.0, bptt_steps=8, sample=True, reference=None,
-                      anchor=None, clock=None):
+                      anchor=None, clock=None, teachers=None, action_mask_fn=None, aux=None):
     """Differentiable current-state-only rollouts with one RNG draw per batch.
+
+    extended-04 A2 hooks (all None = the historical path, unchanged):
+    teachers: one public reference per environment; per decision the teacher's action on
+      the actor's own observation/catalog gives a CE target on the unmasked logits,
+      stored in aux["rehearsal_ce"][env] (out-of-catalog proposals are counted, never
+      repaired). The teacher never selects the executed action.
+    action_mask_fn(env_index, observation, candidates, history) -> None or a bool per
+      candidate (True = masked); history = [(before, action, after), ...] of that
+      episode. Masked logits -> -inf before sampling (no mask if all would be masked);
+      logp/entropy are under the masked distribution. Counts in aux.
+    aux: dict filled with the hooks' outputs (required when a hook is given).
 
     This is an explicit alternative to serial episode sampling: categorical RNG
     draws are consumed by time then active episode, so identical seeds do not
@@ -406,6 +558,17 @@ def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
     clock: optional PhaseClock (observational timing only).
     """
     phase = clock or _no_phase
+    hooks = teachers is not None or action_mask_fn is not None
+    if hooks and aux is None:
+        raise ValueError("A2 rollout hooks need an aux dict")
+    if teachers is not None:
+        if len(teachers) != len(environments):
+            raise ValueError("One public teacher per environment")
+        aux.update(rehearsal_ce=[[] for _ in environments], rehearsal_decisions=0, rehearsal_out_of_catalog=0,
+                   rehearsal_agreement=0)
+    if action_mask_fn is not None:
+        histories = [[] for _ in environments]
+        aux.update(masked_decisions=0, masked_actions=0, all_masked_fallbacks=0)
     observations = [env.observe() for env in environments]
     traces, terms = [[] for _ in environments], [[] for _ in environments]
     kls = [[] for _ in environments]
@@ -428,9 +591,18 @@ def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
         with phase("forward_policy"):
             current_hidden = None if hidden is None else hidden.index_select(0, indices)
             logits, values, next_hidden = score_batch(model, batch, current_hidden)
-            distribution = torch.distributions.Categorical(logits=logits)
-            selected = distribution.sample() if sample else logits.argmax(-1)
+            if action_mask_fn is None:
+                distribution = torch.distributions.Categorical(logits=logits)
+                selected = distribution.sample() if sample else logits.argmax(-1)
+            else:
+                masked_logits, row_masked = _masked_logits(logits, batch[2], action_mask_fn, active, observations,
+                                                           public, histories, aux)
+                distribution = torch.distributions.Categorical(logits=masked_logits)
+                selected = distribution.sample() if sample else masked_logits.argmax(-1)
             logp, entropy = distribution.log_prob(selected), distribution.entropy()
+        if teachers is not None:
+            with phase("rehearsal_teacher"):
+                rehearsal_rows, rehearsal = _rehearsal_ce(logits, teachers, active, observations, public, aux)
         with phase("forward_frozen"):
             if reference is not None:
                 # Frozen round-start policy on the same public states; no gradient.
@@ -460,6 +632,10 @@ def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
                 kls[index].append(kl[row])
             if anchor is not None:
                 anchor_kls[index].append(anchor_kl[row])
+            if teachers is not None and row in rehearsal_rows:
+                aux["rehearsal_ce"][index].append(rehearsal[rehearsal_rows[row]])
+            if action_mask_fn is not None:
+                histories[index].append((before, action, after))
             previous_utilities[index] = utility
             with phase("trace_export"):
                 traces[index].append({"step": step, "observation": before.to_dict(), "action": asdict(action),
@@ -467,6 +643,8 @@ def batched_on_policy(model, environments, *, device="cpu", max_steps=64,
                     "neural_work_units": neural_work_per_forward, "neural_forward_wall_seconds_allocated": neural_wall/len(active),
                     "active_batch_size": len(active), "remaining_steps": after.remaining_steps,
                     "remaining_work": after.remaining_work, "feedback": after.feedback})
+                if action_mask_fn is not None:
+                    traces[index][-1]["masked_actions"] = row_masked[row]
     timing = {"batch_process_cpu_seconds": time.process_time()-cpu_start,
               "batch_wall_seconds": time.perf_counter()-wall_start, "batch_size": len(environments),
               "neural_timing_scope": "collate/device+model+CPU sampling sync; equally allocated, not serial latency"}
@@ -488,7 +666,8 @@ def actor_critic_terms(episode_terms, config):
     return losses
 
 
-def actor_critic_objective(episodes, config, kls=None, anchor_kls=None):
+def actor_critic_objective(episodes, config, kls=None, anchor_kls=None, *, rehearsal_ces=None,
+                           entropy_dual=None, critic_only=False):
     """Policy weighting is declared separately from critic regression weighting.
 
     decision_mean retains the historical per-decision objective. episode_mean
@@ -538,8 +717,19 @@ def actor_critic_objective(episodes, config, kls=None, anchor_kls=None):
         policy_loss = torch.stack([part for parts in policy_by_episode for part in parts]).mean()
         entropy = torch.stack([part for parts in entropy_by_episode for part in parts]).mean()
     value_loss = torch.stack(values).mean()
-    loss = policy_loss+config.value_weight*value_loss-config.entropy_weight*entropy
+    if critic_only:  # A2-crit warm-up: the critic regression alone (actor terms reported, not optimized)
+        return config.value_weight*value_loss, {"policy_loss": policy_loss.detach(),
+            "critic_decision_mean_loss": value_loss, "entropy": entropy.detach(), "critic_warmup": zero + 1}
+    rl_loss = policy_loss+config.value_weight*value_loss
+    if config.rl_loss_weight == 0.0:  # A2-imit: RL policy/critic loss off (out of the graph entirely,
+        rl_loss = zero                # so the value head gets no gradient and no AdamW decay step)
+    elif config.rl_loss_weight != 1.0:
+        rl_loss = config.rl_loss_weight*rl_loss
+    loss = rl_loss-config.entropy_weight*entropy
     parts = {"policy_loss": policy_loss, "critic_decision_mean_loss": value_loss, "entropy": entropy}
+    if entropy_dual is not None:  # A2-ent: Lagrange multiplier on the entropy constraint
+        loss = loss-entropy_dual*entropy
+        parts["entropy_dual"] = zero + entropy_dual
     if kls is not None:
         flat = [k for episode in kls for k in episode]
         kl = torch.stack(flat).mean() if flat else zero
@@ -550,6 +740,11 @@ def actor_critic_objective(episodes, config, kls=None, anchor_kls=None):
         anchor_kl = torch.stack(flat).mean() if flat else zero
         loss = loss+config.anchor_kl_weight*anchor_kl
         parts["kl_to_anchor"] = anchor_kl
+    if rehearsal_ces is not None:  # A2-reh: supplied public-teacher CE on the visited states
+        flat = [c for episode in rehearsal_ces for c in episode]
+        rehearsal = torch.stack(flat).mean() if flat else zero
+        loss = loss+config.rehearsal_weight*rehearsal
+        parts["rehearsal_ce"] = rehearsal
     return loss, parts
 
 
@@ -579,6 +774,49 @@ def load_anchor(anchor_checkpoint: dict, model, device="cpu"):
                     "source_updates": saved.get("updates"), "source_presentations": saved.get("presentations")}
 
 
+def _progress_v1_mask(batch_size: int):
+    """A2-dep rule "progress_v1": the progress diagnostic v1 (extended-04 design §4 / v2 rev. 9,
+    review F5) from tensegra.campaign04_progress, imported lazily.
+
+    Contract required of that module: either `rollout_mask_fn(batch_size)` returning an
+    action_mask_fn, or `ProgressTracker()` with `update(before, action, after)` (one call
+    per executed step, in order) and `flagged_keys(observation)` -> the action_key strings
+    to mask at this public state. verify/abstain are never masked here.
+    """
+    try:
+        from . import campaign04_progress as progress
+    except ImportError as exc:
+        raise RuntimeError("rollout_mask='progress_v1' needs tensegra.campaign04_progress (the extended-04 "
+                           "progress diagnostic v1, branch campaign/e04-infra); the module is absent") from exc
+    if hasattr(progress, "rollout_mask_fn"):
+        return progress.rollout_mask_fn(batch_size)
+    tracker_class = getattr(progress, "ProgressTracker", None)
+    if tracker_class is None or not all(hasattr(tracker_class, m) for m in ("update", "flagged_keys")):
+        raise RuntimeError("campaign04_progress must provide rollout_mask_fn(batch_size) or "
+                           "ProgressTracker with update(before, action, after) and flagged_keys(observation)")
+    from .campaign03_depworld import action_key
+    trackers = [tracker_class() for _ in range(batch_size)]
+    consumed = [0] * batch_size
+
+    def mask(index, observation, candidates, history):
+        tracker = trackers[index]
+        for before, action, after in history[consumed[index]:]:
+            tracker.update(before, action, after)
+        consumed[index] = len(history)
+        flagged = set(tracker.flagged_keys(observation))
+        return [a.kind not in ("verify", "abstain") and action_key(a) in flagged for a in candidates]
+    return mask
+
+
+# Registered A2-dep masked-sampling rules: name -> factory(batch_size) -> action_mask_fn.
+ROLLOUT_MASKS: dict[str, Callable] = {"progress_v1": _progress_v1_mask}
+
+
+def critic_warmup_trainable(name: str, shared: bool) -> bool:
+    """A2-crit: value head only (default), or everything but the actor head `scorer.*`."""
+    return name.startswith("value.") or (shared and not name.startswith("scorer."))
+
+
 class Learner:
     def __init__(self, model, config: TrainConfig):
         self.model, self.config = model.to(config.device), config
@@ -589,6 +827,12 @@ class Learner:
         self.curves: list[dict] = []
         self.data_hash = hashlib.sha256()
         self.anchor = self.anchor_provenance = None
+        # A2-ent Lagrange multiplier (None when no entropy target; persisted in checkpoints).
+        self.entropy_dual = config.entropy_dual_init if config.entropy_target is not None else None
+
+    def actor_critic_updates(self) -> int:
+        """Actor-critic updates already recorded for this lineage (supervised rows excluded)."""
+        return sum(1 for row in self.curves if row.get("rollout_mode") is not None)
 
     def anchor_policy(self):
         """The frozen P2a bootstrap anchor, loaded (and hash-verified) once; None when off."""
@@ -615,6 +859,20 @@ class Learner:
         if anchor is not None and cfg.rollout_mode != "batched":
             raise ValueError("The bootstrap anchor is implemented for batched rollouts only")
         batch_kls = anchor_kls = None
+        a2 = cfg.method == "actor_critic" and a2_options_active(cfg)
+        mask_factory = None
+        if a2:
+            if cfg.rollout_mode != "batched":
+                raise ValueError("A2 options are implemented for batched rollouts only")
+            if cfg.rehearsal_weight > 0 and teacher_factory is None:
+                raise ValueError("Rehearsal needs the run's public reference teacher")
+            if cfg.rollout_mask is not None:
+                if cfg.rollout_mask not in ROLLOUT_MASKS:
+                    raise ValueError(f"Unknown rollout mask rule: {cfg.rollout_mask}")
+                mask_factory = ROLLOUT_MASKS[cfg.rollout_mask]
+            if cfg.critic_warmup_updates and not any(n.startswith("value.") for n, _ in self.model.named_parameters()):
+                raise ValueError("Critic warm-up needs a `value` head")
+            warmup_done = self.actor_critic_updates()
         clock = PhaseClock()
         for _ in range(updates):
             trajectories, outcomes, rollout_episodes = [], [], []
@@ -623,11 +881,20 @@ class Learner:
                 self.seed_cursor += cfg.batch_size
                 with clock("world_construction"):
                     worlds = [world_factory(seed) for seed in seeds]
+                a2_hooks = {}
+                if a2:
+                    if cfg.rehearsal_weight > 0:
+                        a2_hooks["teachers"] = [teacher_factory() for _ in worlds]
+                    if mask_factory is not None:
+                        a2_hooks["action_mask_fn"] = mask_factory(len(worlds))
+                    a2_aux = {}
+                    if a2_hooks:
+                        a2_hooks["aux"] = a2_aux
                 with clock("rollout_total"):
                     rollout = batched_on_policy(self.model, worlds,
                         device=cfg.device, max_steps=cfg.max_steps, neural_work_per_forward=cfg.neural_work_per_forward,
                         bptt_steps=cfg.bptt_steps, reference=reference,
-                        **({"anchor": anchor} if anchor is not None else {}), clock=clock)
+                        **({"anchor": anchor} if anchor is not None else {}), clock=clock, **a2_hooks)
                 results, all_terms = rollout[:2]
                 batch_kls = rollout[2] if reference is not None else None
                 anchor_kls = rollout[3] if anchor is not None else None
@@ -663,15 +930,41 @@ class Learner:
                 else:
                     loss, count = supervised_loss(self.model, trajectories, cfg.device, cfg.bptt_steps)
             else:
+                a2_objective, warmup = {}, False
+                if a2:
+                    warmup = warmup_done < cfg.critic_warmup_updates
+                    if "rehearsal_ce" in a2_aux:
+                        a2_objective["rehearsal_ces"] = a2_aux["rehearsal_ce"]
+                    if self.entropy_dual is not None:
+                        a2_objective["entropy_dual"] = self.entropy_dual
+                    if warmup:
+                        a2_objective["critic_only"] = True
                 with clock("objective"):
-                    loss, objective_parts = actor_critic_objective(rollout_episodes, cfg, batch_kls, anchor_kls)
+                    loss, objective_parts = actor_critic_objective(rollout_episodes, cfg, batch_kls, anchor_kls,
+                                                                   **a2_objective)
                 count = sum(map(len, rollout_episodes))
             with clock("backward"):
                 if not gradients_ready:
                     loss.backward()
+                if a2 and warmup:  # A2-crit: frozen parameters get no gradient, so no step/decay/state
+                    for name, parameter in self.model.named_parameters():
+                        if not critic_warmup_trainable(name, cfg.critic_warmup_shared):
+                            parameter.grad = None
                 norm = nn.utils.clip_grad_norm_(self.model.parameters(), cfg.gradient_clip)
             with clock("optimizer_step"):
                 self.optimizer.step()
+            if a2:
+                a2_row = {"critic_warmup": warmup, **{k: v for k, v in a2_aux.items() if k != "rehearsal_ce"}}
+                if self.entropy_dual is not None:
+                    decisions = [float(t[2].detach()) for episode in rollout_episodes for t in episode]
+                    measured = sum(decisions)/len(decisions)
+                    a2_row.update(entropy_measured=measured, entropy_target=cfg.entropy_target,
+                                  entropy_dual_used=self.entropy_dual)
+                    if not warmup:
+                        self.entropy_dual = min(cfg.entropy_dual_max, max(-cfg.entropy_dual_max,
+                            self.entropy_dual + cfg.entropy_dual_lr*(cfg.entropy_target - measured)))
+                    a2_row["entropy_dual_next"] = self.entropy_dual
+                warmup_done += 1
             self.updates += 1
             self.presentations += count
             self.episodes += cfg.batch_size
@@ -687,6 +980,8 @@ class Learner:
                 "supervised_target_decisions": count if cfg.method == "supervised" else 0,
                 "on_policy_decisions": count if cfg.method == "actor_critic" else 0,
                 "solver_cpu_seconds": sum(o["solver_cpu_seconds"] for o in outcomes)})
+            if a2:
+                self.curves[-1]["a2"] = a2_row
         result = {"updates": updates, "process_cpu_seconds": time.process_time()-start_cpu,
                   "wall_seconds": time.perf_counter()-start_wall, "last": self.curves[-1] if updates else None}
         if clock.wall:
@@ -696,6 +991,11 @@ class Learner:
             result["phase_timing"] = clock.as_dict()
         if anchor is not None:
             result["anchor"] = {**self.anchor_provenance, "anchor_kl_weight": cfg.anchor_kl_weight}
+        if a2:
+            result["a2"] = {"options": {k: getattr(cfg, k) for k in A2_FIELD_DEFAULTS},
+                            "actor_critic_updates_after": warmup_done, "entropy_dual": self.entropy_dual,
+                            "teacher": getattr(teacher_factory(), "reference_name", None)
+                                       if cfg.rehearsal_weight > 0 else None}
         return result
 
     def evaluate(self, seeds, world_factory, output: Path | None = None):
@@ -731,7 +1031,8 @@ class Learner:
             "torch_rng": torch.get_rng_state(), "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
             "python_rng": random.getstate(), "metadata": metadata or {},
             "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "resume_history": self.resume_history}, path)
+            "resume_history": self.resume_history,
+            **({"entropy_dual": self.entropy_dual} if self.entropy_dual is not None else {})}, path)
 
     def load(self, path: Path, *, allow_config_changes=False, reset_learning_rate=False):
         checkpoint = torch.load(path, map_location=self.config.device, weights_only=False)
@@ -740,7 +1041,7 @@ class Learner:
         current = asdict(self.config)
         # Checkpoints predating the P2a anchor fields carry their (off) defaults, so
         # the historical resume/import record is unchanged when the anchor is off.
-        saved_config = {**ANCHOR_FIELD_DEFAULTS, **checkpoint["config"]}
+        saved_config = {**ANCHOR_FIELD_DEFAULTS, **A2_FIELD_DEFAULTS, **checkpoint["config"]}
         differences = {k: {"checkpoint": saved_config.get(k), "requested": v}
                        for k, v in current.items() if saved_config.get(k) != v}
         semantic_changes = set(differences) - {"device", "evaluation_batch"}
@@ -763,6 +1064,8 @@ class Learner:
             torch.cuda.set_rng_state_all([s.cpu() for s in checkpoint["cuda_rng"]])
         # Hash chain restart explicitly binds the previous digest, not fake replay.
         self.data_hash = hashlib.sha256(checkpoint["data_hash"].encode())
+        if self.config.entropy_target is not None:  # A2-ent dual continues across tranches
+            self.entropy_dual = checkpoint.get("entropy_dual", self.config.entropy_dual_init)
         return checkpoint["metadata"]
 
 

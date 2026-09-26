@@ -1,0 +1,33 @@
+{
+  "measurement": "mean per-decision entropy (nats) of the sampled policy over valid candidates, on its own sampled batched rollouts over the run's training world_mix",
+  "checkpoint": {
+    "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+    "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+  },
+  "config": "configs/campaign03/p2a-c0-x1-r2.json",
+  "config_sha256": "3913139006c8114d090cb8e56da20885d9c055af37be740d300296cf9422e123",
+  "seed_range": [
+    3970000000,
+    3970000256
+  ],
+  "address_namespace": "e04a2-entropy",
+  "sampling_seed": 20260926,
+  "batch": 32,
+  "max_steps": 96,
+  "teacher": "dep_reuse",
+  "decisions": 8689,
+  "episodes": 256,
+  "entropy_decision_mean": 0.8732183925670455,
+  "entropy_decision_sd": 0.9824961293657578,
+  "entropy_episode_mean_of_means": 0.7439020571285664,
+  "sampled_success": 0.8984375,
+  "sampled_utility": 0.813866796875,
+  "teacher_preflight": {
+    "decisions": 8689,
+    "out_of_catalog": 0,
+    "greedy_agreement_rate": 0.8098745540338359
+  },
+  "process_cpu_seconds": 62.141320287999996,
+  "wall_seconds": 42.435174668999935,
+  "solver_child_note": "solver worker CPU is outside process_cpu_seconds (metered by the outer runner)"
+}

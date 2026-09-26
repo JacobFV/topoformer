@@ -432,6 +432,21 @@ class PopulationRun:
             del learner, model
         self.state.setdefault("initialization_attempt_costs", []).append(elapsed(start))
         self._record_anchor()
+        self._record_a2()
+
+    def _record_a2(self):
+        """extended-04 A2 options (only when any is on, so historical state is unchanged)."""
+        from .campaign02_training import A2_FIELD_DEFAULTS, A2_OPTION_NOTES, ROLLOUT_MASKS, a2_options_active
+        train = TrainConfig(**self.config.train)
+        if not a2_options_active(train):
+            return
+        if train.rollout_mask is not None:  # fail before any training if the rule cannot be built
+            if train.rollout_mask not in ROLLOUT_MASKS:
+                raise ValueError(f"Unknown rollout mask rule: {train.rollout_mask}")
+            ROLLOUT_MASKS[train.rollout_mask](1)
+        self.state["a2"] = {"options": {k: getattr(train, k) for k in A2_FIELD_DEFAULTS},
+                            "rehearsal_teacher": self.config.teacher if train.rehearsal_weight > 0 else None,
+                            "semantics": A2_OPTION_NOTES}
 
     def _record_anchor(self):
         """P2a bootstrap anchor provenance (only when configured, so historical state is unchanged).
@@ -483,8 +498,10 @@ class PopulationRun:
             if cfg.curriculum_mutation:
                 weights = list(member["curriculum"])
                 train_factory = lambda seed: self.component_factory(seed, weighted_index(seed, weights))
+            # The public teacher also serves A2 rehearsal (extended-04) when that option is on.
             timing = learner.train_tranche(cfg.updates_per_slot, train_factory,
-                self.teacher_factory if learner.config.method == "supervised" else None)
+                self.teacher_factory if learner.config.method == "supervised" or learner.config.rehearsal_weight > 0
+                else None)
             output = self.output / "development" / f"round-{r}-slot-{slot}-attempt-{attempt_id}.jsonl.gz"
             development_clock = time.perf_counter(), time.process_time()
             metrics = learner.evaluate(range(cfg.development_seed_start,

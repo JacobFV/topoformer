@@ -1,0 +1,140 @@
+{
+  "mode": "single",
+  "population_seed": 30002,
+  "initialization_seeds": [
+    300200,
+    300201,
+    300202,
+    300203,
+    300204,
+    300205
+  ],
+  "optimizer_policy": "inherit",
+  "teacher": "dep_reuse",
+  "threads": 1,
+  "world_family": "depworld",
+  "policy": {
+    "interface": "legacy",
+    "feature_version": "d1"
+  },
+  "world_mix": [
+    {
+      "categories": 3,
+      "choices": 3,
+      "locations": 7,
+      "slots": 6,
+      "compute_price": 0.0001,
+      "event_trigger": "progress",
+      "p_event": 0.5,
+      "foreign_records": 0,
+      "event_kinds": [
+        "edge_closed",
+        "capacity_reduced",
+        "slot_closed"
+      ]
+    },
+    {
+      "categories": 3,
+      "choices": 3,
+      "locations": 7,
+      "slots": 6,
+      "compute_price": 0.0001,
+      "event_trigger": "progress",
+      "p_event": 0.5,
+      "foreign_records": 2,
+      "event_kinds": [
+        "edge_closed",
+        "capacity_reduced",
+        "slot_closed"
+      ]
+    }
+  ],
+  "train": {
+    "width": 1024,
+    "family": "lightweight",
+    "device": "cuda",
+    "batch_size": 8,
+    "learning_rate": 0.0003,
+    "rollout_mode": "batched",
+    "max_steps": 96,
+    "evaluation_batch": 32,
+    "policy_loss_reduction": "decision_mean",
+    "advantage_normalization": true,
+    "entropy_target": 0.8732,
+    "entropy_dual_lr": 0.02,
+    "entropy_dual_init": 0.0,
+    "entropy_dual_max": 1.0
+  },
+  "development_seed_start": 3902000000,
+  "development_examples": 128,
+  "training_seed_stride": 1000000,
+  "member_hyperparameters": [
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    },
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    },
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    },
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    },
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    },
+    {
+      "learning_rate": 3e-05,
+      "entropy_weight": 0.003,
+      "kl_weight": 0.3
+    }
+  ],
+  "rounds": 5,
+  "updates_per_slot": 60,
+  "methods": [
+    "actor_critic",
+    "actor_critic",
+    "actor_critic",
+    "actor_critic",
+    "actor_critic"
+  ],
+  "training_seed_start": 3440000000,
+  "address_namespace": "e03p1-rl-r2",
+  "initial_checkpoints": [
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    }
+  ]
+}

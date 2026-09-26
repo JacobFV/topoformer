@@ -1,0 +1,96 @@
+{
+  "lineage": "x1-r2",
+  "horizon_updates": 1800,
+  "entropy_measurement": {
+    "checkpoint": {
+      "path": "/home/brand/tensegra-campaign03/results/p1-boot-x1-r2/checkpoints/round-0-slot-5-attempt-5.pt",
+      "sha256": "74ff10a686c04b4face63ac2e666add7fd5a3c17509ec78c81f8aa954b5f2fc9"
+    },
+    "entropy_decision_mean": 0.8732183925670455,
+    "entropy_decision_sd": 0.9824961293657578,
+    "decisions": 8689,
+    "episodes": 256,
+    "seed_range": [
+      3970000000,
+      3970000256
+    ],
+    "sampling_seed": 20260926
+  },
+  "arms": {
+    "a2-reh": {
+      "path": "configs/campaign04/a2-reh-x1-r2.json",
+      "sha256": "ae55da9c86bb79a7c6e24b5af5b9f3326fd33cef47c6b5f5ca2e15729c1e47a8",
+      "base": "p2a-c1-x1-r2.json",
+      "difference_from_base": {
+        "train.rehearsal_weight": {
+          "base": null,
+          "arm": 0.5
+        }
+      }
+    },
+    "a2-imit": {
+      "path": "configs/campaign04/a2-imit-x1-r2.json",
+      "sha256": "15f96dbd55c1df9fe13c415c070bff2328f2064bfc29f2821dc9f20c9f92052a",
+      "base": "p2a-c1-x1-r2.json",
+      "difference_from_base": {
+        "train.rehearsal_weight": {
+          "base": null,
+          "arm": 0.5
+        },
+        "train.rl_loss_weight": {
+          "base": null,
+          "arm": 0.0
+        }
+      }
+    },
+    "a2-crit": {
+      "path": "configs/campaign04/a2-crit-x1-r2.json",
+      "sha256": "6dc3ec637022924d7fd8d0eed7cef5bfd0b6d7ef53123b437e3f57fd1acc905a",
+      "base": "p2a-c1-x1-r2.json",
+      "difference_from_base": {
+        "train.critic_warmup_shared": {
+          "base": null,
+          "arm": false
+        },
+        "train.critic_warmup_updates": {
+          "base": null,
+          "arm": 300
+        }
+      }
+    },
+    "a2-dep": {
+      "path": "configs/campaign04/a2-dep-x1-r2.json",
+      "sha256": "889699501f440887916658ef6fbcf917e2b16ca2f41fb1b6d35cd715bd7dd101",
+      "base": "p2a-c1-x1-r2.json",
+      "difference_from_base": {
+        "train.rollout_mask": {
+          "base": null,
+          "arm": "progress_v1"
+        }
+      }
+    },
+    "a2-ent": {
+      "path": "configs/campaign04/a2-ent-x1-r2.json",
+      "sha256": "ea0ee1d5e4f1bbac163ded5d193da60a5f54ad27fc43fc979e07ca80ee7f5569",
+      "base": "p2a-c0-x1-r2.json",
+      "difference_from_base": {
+        "train.entropy_dual_init": {
+          "base": null,
+          "arm": 0.0
+        },
+        "train.entropy_dual_lr": {
+          "base": null,
+          "arm": 0.02
+        },
+        "train.entropy_dual_max": {
+          "base": null,
+          "arm": 1.0
+        },
+        "train.entropy_target": {
+          "base": null,
+          "arm": 0.8732
+        }
+      }
+    }
+  }
+}

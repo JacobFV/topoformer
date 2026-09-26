@@ -13,9 +13,15 @@
   "cpu_accounting": "process-tree core-seconds from job-wrapper receipts for ALL remote work: main jobs (results/<job>-process) and dev/test/audit/generation work via bin/metered.sh (results/dev/*-process). Local (no-torch) subagent CPU is estimated and disclosed separately.",
   "host": "pro6000 (WSL2 Ubuntu, RTX PRO 6000); remote root ~/tensegra-campaign04",
   "historical_note": "Extended-03 ledger (research/campaigns/extended-03/budget.json) is separate and unchanged.",
-  "jobs": [],
-  "charged_cpu_core_seconds": 0,
-  "charged_gpu_seconds": 0,
+  "jobs": "see research/results/campaign-04/receipts.json",
+  "charged_cpu_core_seconds": 1.5,
+  "charged_gpu_seconds": 0.0,
   "local_cpu_estimate_core_seconds": 0,
-  "status": "active"
+  "status": "active",
+  "charged_breakdown": {
+    "main_cpu": 0.0,
+    "dev_cpu": 1.5,
+    "receipts": 1,
+    "running_unreceipted": []
+  }
 }

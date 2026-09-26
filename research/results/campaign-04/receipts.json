@@ -1,0 +1,15 @@
+{
+ "rows": [
+  {
+   "dir": "dev/selftest-20260926T184357-764-process",
+   "dev": true,
+   "started_unix": 1790448237.580735,
+   "ended_unix": 1790448240.2180395,
+   "wall_seconds": 2.6364019669999976,
+   "cpu_core_seconds": 1.480850033,
+   "exit_code": 0,
+   "stop_reason": null
+  }
+ ],
+ "running": []
+}

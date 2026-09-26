@@ -1,8 +1,22 @@
 {
   "owner": "root",
-  "status": "design",
-  "running": [],
+  "status": "phase_a_b_build",
+  "running": [
+    "e04-throughput (Phase A)",
+    "e04-infra (diagnostic, deploy, clone, A1 tooling)",
+    "e04-a2arms (A2 options + configs)",
+    "e04-probeworld (Track B)"
+  ],
   "ready": [],
-  "blocked": [],
-  "completed": []
+  "blocked": [
+    "A1 deployment matrix (after infra)",
+    "A2 screens (after a2arms; A2-dep also needs infra)",
+    "Track C builder (after infra)",
+    "Track B ladder (after probeworld)",
+    "Phase F (launch by 2026-09-27T09:45Z)"
+  ],
+  "completed": [
+    "campaign root, budget window, metering",
+    "design v1 + review + v2"
+  ]
 }

@@ -26,3 +26,5 @@
   - **e04-probeworld:** Track B.
 
   The Phase A throughput work continues (e04-throughput). All remote dev work is metered.
+- 2026-09-26T19:11Z: A2 options merged (6cb0ecce; 268 tests on snapshot 71109534, metered). **Four A2 screens launched:** a2-reh, a2-imit, a2-crit, a2-ent. a2-dep waits for the infra progress tracker. [protocol-A2.md](protocol-A2.md) registered at 19:15Z, before any A2 output: registered modes, the promotion rule against same-mode and best-mode bootstraps, the imitation control, and screening seeds from 140M.
+  - Metering note: metered.sh runs commands without a shell, so globs must go through `bash -c`.

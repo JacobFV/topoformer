@@ -6,3 +6,5 @@
 | X1 bootstrap policies | dep_reuse teacher supervision (public-only) | action choice | IID sealed (extended-03) |
 | progress diagnostic v1 (signature, classes) | yes (hand-specified, public-only) | - | - |
 | recovery rules R-mask / R-sample | yes (hand-specified) | - | - |
+| A2 rehearsal (a2-reh, a2-imit) | dep_reuse teacher actions on the policy's own sampled states (public-only) | policy update | (A2 screen) |
+| A2 entropy regulation | entropy target = bootstrap entropy (measured) | policy update under the constraint | (A2 screen) |

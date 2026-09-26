@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "campaign": "extended-04",
+  "started_utc": "2026-09-26T18:43:01Z",
+  "deadline_utc": "2026-09-27T18:43:01Z",
+  "ceilings": {
+    "cpu_core_seconds": 172800,
+    "gpu_device_seconds": 43200,
+    "elapsed_seconds": 86400
+  },
+  "reserve_fraction": 0.2,
+  "gpu_accounting": "device occupancy: union of wall intervals of jobs that use the GPU (main jobs with device cuda); CPU-only dev jobs (CUDA_VISIBLE_DEVICES empty) are charged CPU only",
+  "cpu_accounting": "process-tree core-seconds from job-wrapper receipts for ALL remote work: main jobs (results/<job>-process) and dev/test/audit/generation work via bin/metered.sh (results/dev/*-process). Local (no-torch) subagent CPU is estimated and disclosed separately.",
+  "host": "pro6000 (WSL2 Ubuntu, RTX PRO 6000); remote root ~/tensegra-campaign04",
+  "historical_note": "Extended-03 ledger (research/campaigns/extended-03/budget.json) is separate and unchanged.",
+  "jobs": [],
+  "charged_cpu_core_seconds": 0,
+  "charged_gpu_seconds": 0,
+  "local_cpu_estimate_core_seconds": 0,
+  "status": "active"
+}
